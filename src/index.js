@@ -26,15 +26,22 @@ async function handleAPI(request, url, env) {
   }
 
   let targetUrl;
+
+  // 修正路由：將 UI 的請求映射到正確的後端端點
   if (url.pathname === '/api/generate') {
-    targetUrl = 'https://api.geminigen.ai/api/generate';
+    // 根據目前的線索，生成端點很可能在 uapi 路由或 v1 之下。
+    // 如果這裡依然 404，你需要把 'https://api.geminigen.ai/uapi/v1/generate_image' 
+    // 替換為你在瀏覽器 Network 面板中實際抓到的 POST 請求 URL
+    targetUrl = 'https://api.geminigen.ai/uapi/v1/generate_image';
   } else if (url.pathname.startsWith('/api/history/')) {
-    targetUrl = `https://api.geminigen.ai${url.pathname}${url.search}`;
+    // History 路由：將 /api/history/... 轉發到目標的 /api/history/...
+    // 例如：https://api.geminigen.ai/api/history/40b11146-...
+    const pathAndSearch = url.pathname + url.search;
+    targetUrl = `https://api.geminigen.ai${pathAndSearch}`;
   } else {
-    return new Response('無效端點', { status: 404 });
+    return new Response(JSON.stringify({detail: "Not Found in Worker Router"}), { status: 404 });
   }
 
-  // 根據你提供的真實 Request 特徵，完美還原瀏覽器的 Fetch Headers
   const headers = new Headers();
   headers.set('Authorization', `Bearer ${token}`);
   headers.set('x-guard-id', guardId);
@@ -45,12 +52,9 @@ async function handleAPI(request, url, env) {
   headers.set('Sec-Ch-Ua-Mobile', '?0');
   headers.set('Sec-Ch-Ua-Platform', '"Windows"');
 
-  // 關鍵設定：加入 Referrer 與對應的 Policy
   headers.set('Origin', 'https://geminigen.ai'); 
   headers.set('Referer', 'https://geminigen.ai/');
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-
-  // 加入其他常見的防護繞過標頭
   headers.set('Sec-Fetch-Dest', 'empty');
   headers.set('Sec-Fetch-Mode', 'cors');
   headers.set('Sec-Fetch-Site', 'same-site');
@@ -70,7 +74,7 @@ async function handleAPI(request, url, env) {
     redirect: 'follow'
   };
 
-  if (request.method === 'POST') {
+  if (request.method === 'POST' || request.method === 'PUT') {
       fetchOptions.body = bodyData;
   }
 
@@ -83,14 +87,21 @@ async function handleAPI(request, url, env) {
         data = JSON.parse(rawText); 
       } catch(e) {
         data = {
-          error: "伺服器未回傳 JSON (可能被 Cloudflare 阻擋)",
+          error: "伺服器未回傳 JSON",
           httpStatus: resp.status,
-          rawResponsePreview: rawText.substring(0, 1000)
+          rawResponsePreview: rawText.substring(0, 500)
         };
       }
 
+      // 如果後端回傳 404，在前端標示出來以方便除錯
+      if (resp.status === 404) {
+         if (typeof data === 'object') {
+             data._debug = `請求的目標 URL (${targetUrl}) 不存在 (404)。請檢查 Network 面板確認真正的生成路徑。`;
+         }
+      }
+
       return new Response(JSON.stringify(data), {
-        status: resp.status === 200 ? 200 : (resp.status === 403 ? 403 : 500),
+        status: resp.status === 200 ? 200 : (resp.status >= 400 ? resp.status : 500),
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Content-Type': 'application/json'
@@ -210,15 +221,18 @@ async function generateImage() {
     statusEl.innerHTML = \`<div class="status">\${resp.status} (\${endTime - startTime}ms)</div>\`;
     document.getElementById('api-response').textContent = JSON.stringify(data, null, 2);
 
-    if (data.id) {
-      currentJobId = data.id;
+    if (resp.status === 404) {
+       document.getElementById('job-status').innerHTML = \`<div class="error-msg">404 錯誤：路徑不存在<br>這表示我們設定的 targetUrl 不正確。</div>\`;
+       document.querySelector('[data-tab="response"]').click();
+    } else if (data.id || data.task_id || data.uuid) {
+      currentJobId = data.id || data.task_id || data.uuid;
       document.getElementById('job-status').innerHTML = \`任務 ID: \${currentJobId}<br>自動輪詢狀態中...\`;
       pollHistory();
-    } else if (data.error) {
-       document.getElementById('job-status').innerHTML = \`<div class="error-msg">\${data.error}<br>HTTP \${resp.status}</div>\`;
+    } else if (data.error || data.detail) {
+       document.getElementById('job-status').innerHTML = \`<div class="error-msg">\${data.error || data.detail}<br>HTTP \${resp.status}</div>\`;
        document.querySelector('[data-tab="response"]').click();
     } else {
-       document.getElementById('job-status').innerHTML = '未取得任務 ID。';
+       document.getElementById('job-status').innerHTML = '未取得任務 ID，請查看 API 響應。';
     }
   } catch (err) {
     statusEl.innerHTML = \`<div class="status" style="background:rgba(255,0,0,0.5);">錯誤: \${err.message}</div>\`;
@@ -246,7 +260,7 @@ async function pollHistory() {
       document.getElementById('history-data').textContent = JSON.stringify(hist, null, 2);
 
       if (hist.status === 'completed' || hist.status === 'success') {
-        const outUrl = hist.output_url || hist.url || (hist.data && hist.data.url);
+        const outUrl = hist.output_url || hist.url || (hist.data && hist.data.url) || hist.image_url;
         if(outUrl) {
             document.getElementById('image-preview').src = outUrl;
             document.getElementById('image-preview').style.display = 'block';
