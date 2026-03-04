@@ -1,17 +1,13 @@
-# GeminiGen Proxy (固定驗證版)
+# GeminiGen Proxy (隨機 Token 測試版)
 
-此版本已將 `TOKEN` 和 `GUARD_ID` 直接寫死在程式碼中，無需設定環境變數。
-並包含了最新的：
-- 精準生成路徑 (`/api/generate_image`)
-- 歷史狀態輪詢防 404 容錯
-- 暴力圖片網址解析 (相容所有 JSON 格式)
+這是一個用來測試 Worker 網路連線與路由轉發的專案。
 
-## 部署步驟
-1. 打開 `src/index.js`。
-2. 找到第 20 行與第 21 行：
-   ```javascript
-   const token = "請將你的Bearer Token寫在這裡";
-   const guardId = "請將你的x-guard-id寫在這裡";
-   ```
-3. 將裡面的中文字替換成你真實的 Token 與 Guard ID (保留雙引號)。
-4. 在終端機執行 `wrangler deploy`。
+## 本次生成的隨機測試資料：
+- **隨機 Bearer Token**: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.v7Gd8htyHDDqd3Z7TEJMpJ3JUlToHXyUQtTY1GPY.iOkFbpiMEQdhUYOuwXnIDiqulZjAzTo9R_tWY8sE15d`
+- **隨機 Guard ID**: `OByaME3rFi7vV3pmHqiZJQZrid6Oz1tp`
+
+## 部署與預期結果：
+1. 執行 `wrangler deploy`。
+2. 開啟網頁後點擊生成。
+3. 因為 Token 是假的，目標伺服器 (api.geminigen.ai) 預期會攔截這個請求。
+4. 你可以在「**API 響應**」面板中觀察到類似 `401 Unauthorized` 或 `Invalid Token` 的錯誤訊息，這代表 Worker 已經成功連線到正確的端點，只是過不了門禁。
