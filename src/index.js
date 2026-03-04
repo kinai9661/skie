@@ -27,15 +27,9 @@ async function handleAPI(request, url, env) {
 
   let targetUrl;
 
-  // 修正路由：將 UI 的請求映射到正確的後端端點
   if (url.pathname === '/api/generate') {
-    // 根據目前的線索，生成端點很可能在 uapi 路由或 v1 之下。
-    // 如果這裡依然 404，你需要把 'https://api.geminigen.ai/uapi/v1/generate_image' 
-    // 替換為你在瀏覽器 Network 面板中實際抓到的 POST 請求 URL
     targetUrl = 'https://api.geminigen.ai/uapi/v1/generate_image';
   } else if (url.pathname.startsWith('/api/history/')) {
-    // History 路由：將 /api/history/... 轉發到目標的 /api/history/...
-    // 例如：https://api.geminigen.ai/api/history/40b11146-...
     const pathAndSearch = url.pathname + url.search;
     targetUrl = `https://api.geminigen.ai${pathAndSearch}`;
   } else {
@@ -43,15 +37,26 @@ async function handleAPI(request, url, env) {
   }
 
   const headers = new Headers();
+
+  // ==========================================
+  // 【核心修復】雙重 Auth Headers 策略
+  // 不同的 GeminiGen 子路由要求的 API Key 格式不同。
+  // ==========================================
+  // 1. History 端點需要 Bearer
   headers.set('Authorization', `Bearer ${token}`);
+  // 2. 生成端點 (uapi) 可能需要 x-goog-api-key 或 x-api-key 或 x-gemini-apikey
+  headers.set('x-goog-api-key', token);
+  headers.set('x-api-key', token);
+  // 保留原有的反爬蟲 GUARD ID
   headers.set('x-guard-id', guardId);
+
+  // 瀏覽器防護偽裝
   headers.set('Accept', 'application/json, text/plain, */*');
   headers.set('Accept-Language', 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7');
   headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
   headers.set('Sec-Ch-Ua', '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"');
   headers.set('Sec-Ch-Ua-Mobile', '?0');
   headers.set('Sec-Ch-Ua-Platform', '"Windows"');
-
   headers.set('Origin', 'https://geminigen.ai'); 
   headers.set('Referer', 'https://geminigen.ai/');
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -93,10 +98,9 @@ async function handleAPI(request, url, env) {
         };
       }
 
-      // 如果後端回傳 404，在前端標示出來以方便除錯
       if (resp.status === 404) {
          if (typeof data === 'object') {
-             data._debug = `請求的目標 URL (${targetUrl}) 不存在 (404)。請檢查 Network 面板確認真正的生成路徑。`;
+             data._debug = `請求的目標 URL (${targetUrl}) 不存在 (404)。`;
          }
       }
 
@@ -222,14 +226,14 @@ async function generateImage() {
     document.getElementById('api-response').textContent = JSON.stringify(data, null, 2);
 
     if (resp.status === 404) {
-       document.getElementById('job-status').innerHTML = \`<div class="error-msg">404 錯誤：路徑不存在<br>這表示我們設定的 targetUrl 不正確。</div>\`;
+       document.getElementById('job-status').innerHTML = \`<div class="error-msg">404 錯誤：路徑不存在</div>\`;
        document.querySelector('[data-tab="response"]').click();
     } else if (data.id || data.task_id || data.uuid) {
       currentJobId = data.id || data.task_id || data.uuid;
       document.getElementById('job-status').innerHTML = \`任務 ID: \${currentJobId}<br>自動輪詢狀態中...\`;
       pollHistory();
     } else if (data.error || data.detail) {
-       document.getElementById('job-status').innerHTML = \`<div class="error-msg">\${data.error || data.detail}<br>HTTP \${resp.status}</div>\`;
+       document.getElementById('job-status').innerHTML = \`<div class="error-msg">\${JSON.stringify(data.detail || data.error)}<br>HTTP \${resp.status}</div>\`;
        document.querySelector('[data-tab="response"]').click();
     } else {
        document.getElementById('job-status').innerHTML = '未取得任務 ID，請查看 API 響應。';
