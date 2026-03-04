@@ -1,30 +1,17 @@
-# GeminiGen.ai 逆向工程 UI 代理 API (ES Module 版)
+# GeminiGen Proxy (固定驗證版)
 
-此專案已修復 `Unexpected external import of "node:perf_hooks"` 與 `no default export` 的 Cloudflare 部署錯誤。
+此版本已將 `TOKEN` 和 `GUARD_ID` 直接寫死在程式碼中，無需設定環境變數。
+並包含了最新的：
+- 精準生成路徑 (`/api/generate_image`)
+- 歷史狀態輪詢防 404 容錯
+- 暴力圖片網址解析 (相容所有 JSON 格式)
 
-## 目錄結構
-- `wrangler.toml`: Cloudflare Workers 設定檔
-- `src/index.js`: 主程式碼，使用 `export default { fetch }` 格式，內含 HTML 前端 UI。
-- `deploy.sh`: 部署腳本
-
-## 🚀 部署教學
-1. 在本資料夾執行指令 `npm i -g wrangler` (若尚未安裝)。
-2. 登入 Cloudflare: `wrangler login`。
-3. 建立一個 KV 命名空間供我們存放安全密碼：
-   ```bash
-   wrangler kv:namespace create API_SECRETS
+## 部署步驟
+1. 打開 `src/index.js`。
+2. 找到第 20 行與第 21 行：
+   ```javascript
+   const token = "請將你的Bearer Token寫在這裡";
+   const guardId = "請將你的x-guard-id寫在這裡";
    ```
-4. 指令會回傳一段 `[[kv_namespaces]]` 的設定，將 `id = "..."` 複製，並取代本專案內 `wrangler.toml` 裡面的 `id = "your-kv-id-here"`。
-5. **綁定 Token 與 Guard ID**:
-   ```bash
-   wrangler kv:key put --binding=API_SECRETS "TOKEN" "你的 Bearer Token"
-   wrangler kv:key put --binding=API_SECRETS "GUARD_ID" "你的 x-guard-id"
-   ```
-6. **執行部署**:
-   ```bash
-   wrangler deploy
-   ```
-
-## 🛠️ 開發與除錯
-- 你可以直接透過 `wrangler dev` 啟動本地測試（注意：本地測試仍需要 KV 設定）。
-- 若發生授權錯誤（如 Token 過期），請回到 Dashboard 或使用 CLI 更新 `TOKEN` 與 `GUARD_ID`。
+3. 將裡面的中文字替換成你真實的 Token 與 Guard ID (保留雙引號)。
+4. 在終端機執行 `wrangler deploy`。

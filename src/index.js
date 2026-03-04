@@ -3,7 +3,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith('/api/')) {
-      return await handleAPI(request, url, env);
+      return await handleAPI(request, url);
     }
 
     return new Response(getUI(), {
@@ -12,28 +12,25 @@ export default {
   }
 };
 
-async function handleAPI(request, url, env) {
-  const token = env.TOKEN;
-  const guardId = env.GUARD_ID;
+async function handleAPI(request, url) {
+  // ==========================================
+  // 🔑 請在這裡填寫你固定的 TOKEN 與 GUARD_ID
+  // ==========================================
+  const token = "請將你的Bearer Token寫在這裡";
+  const guardId = "請將你的x-guard-id寫在這裡";
 
-  if (!token || !guardId || token === 'your-token-here') {
+  if (token.includes("請將你的Bearer")) {
     return new Response(JSON.stringify({
-      error: '缺少 TOKEN 或 GUARD_ID。請在 Cloudflare Dashboard 設定環境變數。'
-    }), { 
-      status: 500, 
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } 
-    });
+      error: '請先在 src/index.js 中填寫真實的 TOKEN 與 GUARD_ID 後再重新部署！'
+    }), { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
   }
 
   let targetUrl;
-
-  // 關鍵修復：你提供的真實生成路徑是 /api/generate_image，而不是 /api/generate
-  // 但我們為了讓前端不需改動太多，依舊讓前端打 /api/generate，Worker 負責轉發到正確的 /api/generate_image
   if (url.pathname === '/api/generate') {
     targetUrl = 'https://api.geminigen.ai/api/generate_image';
   } else if (url.pathname.startsWith('/api/history/')) {
-    const pathAndSearch = url.pathname + url.search;
-    targetUrl = `https://api.geminigen.ai${pathAndSearch}`;
+    const jobId = url.pathname.replace('/api/history/', '');
+    targetUrl = `https://api.geminigen.ai/api/history/${jobId}`;
   } else {
     return new Response(JSON.stringify({detail: "Not Found in Worker Router"}), { status: 404 });
   }
@@ -42,17 +39,10 @@ async function handleAPI(request, url, env) {
   headers.set('Authorization', `Bearer ${token}`);
   headers.set('x-guard-id', guardId);
   headers.set('Accept', 'application/json, text/plain, */*');
-  headers.set('Accept-Language', 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7');
   headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
-  headers.set('Sec-Ch-Ua', '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"');
-  headers.set('Sec-Ch-Ua-Mobile', '?0');
-  headers.set('Sec-Ch-Ua-Platform', '"Windows"');
   headers.set('Origin', 'https://geminigen.ai'); 
   headers.set('Referer', 'https://geminigen.ai/');
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  headers.set('Sec-Fetch-Dest', 'empty');
-  headers.set('Sec-Fetch-Mode', 'cors');
-  headers.set('Sec-Fetch-Site', 'same-site');
 
   let bodyData = null;
   if (request.method === 'POST') {
@@ -69,7 +59,7 @@ async function handleAPI(request, url, env) {
     redirect: 'follow'
   };
 
-  if (request.method === 'POST' || request.method === 'PUT') {
+  if (request.method === 'POST') {
       fetchOptions.body = bodyData;
   }
 
@@ -77,34 +67,16 @@ async function handleAPI(request, url, env) {
       const resp = await fetch(targetUrl, fetchOptions);
       const rawText = await resp.text();
       let data;
-
-      try { 
-        data = JSON.parse(rawText); 
-      } catch(e) {
-        data = {
-          error: "伺服器未回傳 JSON",
-          httpStatus: resp.status,
-          rawResponsePreview: rawText.substring(0, 500)
-        };
-      }
-
-      if (resp.status === 404) {
-         if (typeof data === 'object') {
-             data._debug = `請求的目標 URL (${targetUrl}) 不存在 (404)。`;
-         }
-      }
+      try { data = JSON.parse(rawText); } 
+      catch(e) { data = { error: "伺服器未回傳 JSON", rawResponsePreview: rawText.substring(0, 500) }; }
 
       return new Response(JSON.stringify(data), {
-        status: resp.status === 200 ? 200 : (resp.status >= 400 ? resp.status : 500),
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Content-Type': 'application/json'
-        }
+        status: resp.status,
+        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
       });
   } catch (err) {
       return new Response(JSON.stringify({error: "Fetch request failed: " + err.message}), { 
-        status: 500,
-        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
+        status: 500, headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
       });
   }
 }
@@ -123,14 +95,13 @@ body { font-family: system-ui, -apple-system, sans-serif; background: linear-gra
 @media (max-width: 768px) { .container { grid-template-columns: 1fr; } }
 .left, .right { background: rgba(255,255,255,.1); backdrop-filter: blur(20px); border-radius: 24px; padding: 2rem; box-shadow: 0 20px 40px rgba(0,0,0,.1); }
 input, select, textarea, button { width: 100%; padding: 1rem; margin: .5rem 0; border: none; border-radius: 12px; font-size: 1rem; background: rgba(255,255,255,.2); color: white; }
-input::placeholder, select { color: rgba(255,255,255,.7); }
-button { background: linear-gradient(135deg, #667eea, #764ba2); cursor: pointer; font-weight: bold; transition: all .3s; border: 1px solid rgba(255,255,255,0.2); }
-button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(102,126,234,.4); }
+button { background: linear-gradient(135deg, #667eea, #764ba2); cursor: pointer; font-weight: bold; transition: all .3s; }
+button:hover:not(:disabled) { transform: translateY(-2px); }
 button:disabled { opacity: .6; cursor: not-allowed; }
 #image-preview { width: 100%; max-height: 400px; object-fit: contain; border-radius: 12px; margin: 1rem 0; display: none; background: rgba(0,0,0,0.2); }
 .tabs { display: flex; background: rgba(255,255,255,.1); border-radius: 12px 12px 0 0; overflow: hidden; }
 .tab { flex: 1; padding: 1rem; text-align: center; cursor: pointer; transition: background .3s; }
-.tab.active, .tab:hover { background: rgba(102,126,234,.6); }
+.tab.active { background: rgba(102,126,234,.6); }
 .tab-content { background: rgba(255,255,255,.1); padding: 1.5rem; border-radius: 0 12px 12px 12px; min-height: 400px; }
 pre { background: rgba(0,0,0,.4); padding: 1rem; border-radius: 8px; overflow: auto; font-size: .9rem; white-space: pre-wrap; word-break: break-all; max-height: 400px;}
 .status { padding: 1rem; border-radius: 12px; margin: 1rem 0; text-align: center; }
@@ -142,14 +113,11 @@ pre { background: rgba(0,0,0,.4); padding: 1rem; border-radius: 8px; overflow: a
 <body>
 <div class="container">
   <div class="left">
-    <h1 style="margin-bottom: 1.5rem; font-size: 2rem;">🖼️ geminigen.ai 生成器</h1>
-    <textarea id="prompt" rows="3" placeholder="輸入圖像描述，例如：A beautiful sunset over mountains with vibrant colors...">A beautiful sunset over mountains with vibrant colors</textarea>
+    <h1>🖼️ geminigen.ai 生成器</h1>
+    <textarea id="prompt" rows="3">A beautiful sunset over mountains</textarea>
     <select id="model"><option value="nano-banana-pro">Nano Banana Pro</option><option value="imagen-4-ultra">Imagen 4 Ultra</option></select>
-    <input id="aspect_ratio" value="16:9" placeholder="aspect_ratio (16:9, 1:1, 9:16)">
-    <input id="style" value="Photorealistic" placeholder="style (Photorealistic, Anime, Oil Painting)">
-    <input id="output_format" value="jpeg" placeholder="output_format (jpeg, png)">
-    <input id="resolution" value="1K" placeholder="resolution (1K, 2K, 4K)">
-    <input id="file_urls" placeholder="file_urls (圖像參考 URL，選填)">
+    <input id="aspect_ratio" value="16:9">
+    <input id="style" value="Photorealistic">
     <button onclick="generateImage()">🚀 生成圖片</button>
     <div id="status"></div>
   </div>
@@ -157,21 +125,21 @@ pre { background: rgba(0,0,0,.4); padding: 1rem; border-radius: 8px; overflow: a
     <div class="tabs">
       <div class="tab active" data-tab="preview">預覽</div>
       <div class="tab" data-tab="response">API 響應</div>
-      <div class="tab" data-tab="request">請求內容</div>
       <div class="tab" data-tab="history">任務歷史</div>
     </div>
     <div id="preview" class="tab-content">
       <img id="image-preview" alt="生成圖片">
-      <div id="job-status" style="margin-top:10px; text-align:center;"></div>
+      <div id="job-status" style="margin-top:10px; text-align:center;">等待生成...</div>
     </div>
     <div id="response" class="tab-content" style="display:none"><pre id="api-response">等待請求...</pre></div>
-    <div id="request" class="tab-content" style="display:none"><pre id="api-request">等待請求...</pre></div>
     <div id="history" class="tab-content" style="display:none"><pre id="history-data">無任務</pre></div>
   </div>
 </div>
 <script>
 let currentJobId = null;
 let pollTimer = null;
+let errorCount = 0;
+let pollCount = 0;
 
 const tabs = document.querySelectorAll('.tab');
 tabs.forEach(tab => tab.addEventListener('click', (e) => {
@@ -188,48 +156,34 @@ async function generateImage() {
   btn.textContent = '生成中...';
   statusEl.innerHTML = '<div class="status loading">發送請求...</div>';
   document.getElementById('image-preview').style.display = 'none';
-  document.getElementById('job-status').innerHTML = '';
 
   const formData = new FormData();
-  ['prompt', 'model', 'aspect_ratio', 'style', 'output_format', 'resolution', 'file_urls'].forEach(id => {
+  ['prompt', 'model', 'aspect_ratio', 'style'].forEach(id => {
     const el = document.getElementById(id);
     if (el.value) formData.append(id, el.value);
   });
 
-  const reqData = Object.fromEntries(formData.entries());
-  document.getElementById('api-request').textContent = JSON.stringify(reqData, null, 2);
-
-  const startTime = Date.now();
   try {
     const resp = await fetch('/api/generate', { method: 'POST', body: formData });
-    const endTime = Date.now();
-
-    const rawText = await resp.text();
-    let data;
-    try {
-        data = JSON.parse(rawText);
-    } catch(e) {
-        data = { error: "解析失敗，可能遭遇阻擋", rawResponse: rawText };
-    }
-
-    statusEl.innerHTML = \`<div class="status">\${resp.status} (\${endTime - startTime}ms)</div>\`;
+    const data = await resp.json();
     document.getElementById('api-response').textContent = JSON.stringify(data, null, 2);
 
-    if (resp.status === 404) {
-       document.getElementById('job-status').innerHTML = \`<div class="error-msg">404 錯誤：路徑不存在</div>\`;
-       document.querySelector('[data-tab="response"]').click();
-    } else if (data.id || data.task_id || data.uuid) {
-      currentJobId = data.id || data.task_id || data.uuid;
+    // 智慧抓取任務 ID
+    const jobId = data.id || data.task_id || data.uuid || (data.data && data.data.id);
+
+    if (jobId) {
+      currentJobId = jobId;
+      errorCount = 0;
+      pollCount = 0;
       document.getElementById('job-status').innerHTML = \`任務 ID: \${currentJobId}<br>自動輪詢狀態中...\`;
       pollHistory();
-    } else if (data.error || data.detail) {
-       document.getElementById('job-status').innerHTML = \`<div class="error-msg">\${JSON.stringify(data.detail || data.error)}<br>HTTP \${resp.status}</div>\`;
-       document.querySelector('[data-tab="response"]').click();
     } else {
-       document.getElementById('job-status').innerHTML = '未取得任務 ID，請查看 API 響應。';
+       document.getElementById('job-status').innerHTML = '<div class="error-msg">未取得任務 ID，請查看 API 響應。</div>';
+       document.querySelector('[data-tab="response"]').click();
     }
+    statusEl.innerHTML = \`<div class="status">\${resp.status} OK</div>\`;
   } catch (err) {
-    statusEl.innerHTML = \`<div class="status" style="background:rgba(255,0,0,0.5);">錯誤: \${err.message}</div>\`;
+    statusEl.innerHTML = \`<div class="status" style="background:red;">錯誤: \${err.message}</div>\`;
   } finally {
     btn.disabled = false;
     btn.textContent = '🚀 生成圖片';
@@ -238,35 +192,61 @@ async function generateImage() {
 
 async function pollHistory() {
   if (pollTimer) clearInterval(pollTimer);
+
   pollTimer = setInterval(async () => {
     if (!currentJobId) return;
+    pollCount++;
+
     try {
       const resp = await fetch(\`/api/history/\${currentJobId}\`);
-      const rawText = await resp.text();
-      let hist;
-      try {
-          hist = JSON.parse(rawText);
-      } catch(e) {
-          console.error("輪詢 JSON 解析失敗", rawText);
+
+      if (resp.status === 404) {
+          if (pollCount > 15) {
+             document.getElementById('job-status').innerHTML = '<div class="error-msg">歷史任務 404 找不到。</div>';
+             clearInterval(pollTimer);
+          }
           return;
       }
 
+      const hist = await resp.json();
       document.getElementById('history-data').textContent = JSON.stringify(hist, null, 2);
 
-      if (hist.status === 'completed' || hist.status === 'success') {
-        const outUrl = hist.output_url || hist.url || (hist.data && hist.data.url) || hist.image_url;
-        if(outUrl) {
-            document.getElementById('image-preview').src = outUrl;
-            document.getElementById('image-preview').style.display = 'block';
-            document.getElementById('job-status').innerHTML = '🎉 生成成功！';
-        }
-        clearInterval(pollTimer);
-      } else if (hist.status === 'failed' || hist.status === 'error') {
-        document.getElementById('job-status').innerHTML = '❌ 生成失敗。';
-        clearInterval(pollTimer);
+      // 暴力搜刮所有可能的圖片欄位
+      let outUrl = hist.output_url || hist.url || hist.image_url || 
+                   (hist.data && (hist.data.url || hist.data.image_url));
+
+      if (!outUrl) {
+          if (hist.images && hist.images.length > 0) outUrl = hist.images[0].url || hist.images[0];
+          if (hist.outputs && hist.outputs.length > 0) outUrl = hist.outputs[0].url || hist.outputs[0];
+          if (hist.data && hist.data.images && hist.data.images.length > 0) outUrl = hist.data.images[0];
       }
-    } catch(e) {}
-  }, 3000);
+
+      const isCompleted = hist.status === 'completed' || hist.status === 'success' || hist.status === 'finished' || hist.status === 200 || hist.status === 1 || outUrl;
+      const isFailed = hist.status === 'failed' || hist.status === 'error' || hist.status === -1;
+
+      if (outUrl) {
+         document.getElementById('image-preview').src = typeof outUrl === 'string' ? outUrl : outUrl.url;
+         document.getElementById('image-preview').style.display = 'block';
+         document.getElementById('job-status').innerHTML = '🎉 生成成功！';
+         clearInterval(pollTimer);
+      } else if (isFailed) {
+         document.getElementById('job-status').innerHTML = \`<div class="error-msg">❌ 生成失敗：\${hist.error || hist.message || '未知錯誤'}</div>\`;
+         clearInterval(pollTimer);
+      } else if (isCompleted && !outUrl) {
+         document.getElementById('job-status').innerHTML = '⚠️ 狀態顯示完成，但找不到圖片 URL，請檢查歷史 JSON。';
+         clearInterval(pollTimer);
+      } else {
+         document.getElementById('job-status').innerHTML = \`任務 ID: \${currentJobId}<br>生成中... 請稍候 (\${pollCount * 4}秒) <br>當前狀態: \${hist.status || hist.state || '處理中'}\`;
+      }
+      errorCount = 0;
+    } catch(e) {
+      errorCount++;
+      if(errorCount > 5) {
+          document.getElementById('job-status').innerHTML = '<div class="error-msg">⚠️ 連續輪詢失敗，停止。請檢查 API。</div>';
+          clearInterval(pollTimer);
+      }
+    }
+  }, 4000); 
 }
 </script>
 </body></html>`
