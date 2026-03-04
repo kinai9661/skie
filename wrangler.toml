@@ -5,5 +5,4 @@ compatibility_flags = ["nodejs_compat"]
 
 [[kv_namespaces]]
 binding = "API_SECRETS"
-id = "your-kv-id-here"
-preview_id = "your-preview-kv-id-here"
+id = "87de20257f2e4cbf8e9dde2b8d3337c9"
