@@ -2,6 +2,4 @@ name = "geminigen-proxy-ui"
 main = "src/index.js"
 compatibility_date = "2024-03-20"
 
-[[kv_namespaces]]
-binding = "API_SECRETS"
-id = "87de20257f2e4cbf8e9dde2b8d3337c9e"
+
