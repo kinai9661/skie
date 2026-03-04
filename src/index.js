@@ -2,10 +2,12 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
+    // 處理 API 請求 (Proxy & History)
     if (url.pathname.startsWith('/api/')) {
       return await handleAPI(request, url, env);
     }
 
+    // 處理根目錄請求，回傳 UI
     return new Response(getUI(), {
       headers: { 'Content-Type': 'text/html; charset=utf-8' }
     });
@@ -13,18 +15,36 @@ export default {
 };
 
 async function handleAPI(request, url, env) {
-  const token = env.TOKEN;
-  const guardId = env.GUARD_ID;
+  // 從 Cloudflare KV 中取得授權資訊
+  let token = '';
+  let guardId = '';
 
-  if (!token || !guardId || token === 'your-token-here') {
+  try {
+    const secrets = await env.API_SECRETS.get(['TOKEN', 'GUARD_ID'], { type: 'json' });
+    if (secrets) {
+      token = secrets.TOKEN;
+      guardId = secrets.GUARD_ID;
+    }
+  } catch (e) {
+    // 降級處理：如果 json 解析失敗，嘗試直接讀取字串
+    token = await env.API_SECRETS.get('TOKEN');
+    guardId = await env.API_SECRETS.get('GUARD_ID');
+  }
+
+  // 若缺乏憑證則阻擋請求
+  if (!token || !guardId) {
     return new Response(JSON.stringify({
-      error: '缺少 TOKEN 或 GUARD_ID。請在 Cloudflare Dashboard 設定環境變數。'
+      error: 'KV 缺少 TOKEN 或 GUARD_ID 變數，請在 Cloudflare Dashboard 設定。'
     }), { 
       status: 500, 
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } 
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      } 
     });
   }
 
+  // 判斷目標 URL
   let targetUrl;
   if (url.pathname === '/api/generate') {
     targetUrl = 'https://api.geminigen.ai/api/generate';
@@ -34,72 +54,49 @@ async function handleAPI(request, url, env) {
     return new Response('無效端點', { status: 404 });
   }
 
-  // 根據你提供的真實 Request 特徵，完美還原瀏覽器的 Fetch Headers
-  const headers = new Headers();
-  headers.set('Authorization', `Bearer ${token}`);
-  headers.set('x-guard-id', guardId);
-  headers.set('Accept', 'application/json, text/plain, */*');
-  headers.set('Accept-Language', 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7');
-  headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
-  headers.set('Sec-Ch-Ua', '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"');
-  headers.set('Sec-Ch-Ua-Mobile', '?0');
-  headers.set('Sec-Ch-Ua-Platform', '"Windows"');
-
-  // 關鍵設定：加入 Referrer 與對應的 Policy
-  headers.set('Origin', 'https://geminigen.ai'); 
-  headers.set('Referer', 'https://geminigen.ai/');
-  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-
-  // 加入其他常見的防護繞過標頭
-  headers.set('Sec-Fetch-Dest', 'empty');
-  headers.set('Sec-Fetch-Mode', 'cors');
-  headers.set('Sec-Fetch-Site', 'same-site');
-
-  let bodyData = null;
+  // 接收前端上傳的 FormData 並重建
+  let bodyData;
   if (request.method === 'POST') {
     try {
       bodyData = await request.formData();
     } catch(e) {
+      // 處理非 FormData 請求
       return new Response(JSON.stringify({error: 'Invalid FormData'}), {status: 400});
     }
   }
 
-  const fetchOptions = {
+  // 發送請求至真正的 GeminiGen API
+  const backendReq = new Request(targetUrl, {
     method: request.method,
-    headers: headers,
-    redirect: 'follow'
-  };
-
-  if (request.method === 'POST') {
-      fetchOptions.body = bodyData;
-  }
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'x-guard-id': guardId
+    },
+    body: request.method === 'POST' ? bodyData : null,
+    duplex: request.method === 'POST' ? 'half' : undefined
+  });
 
   try {
-      const resp = await fetch(targetUrl, fetchOptions);
-      const rawText = await resp.text();
-      let data;
+      const resp = await fetch(backendReq);
+      let data = await resp.text();
 
       try { 
-        data = JSON.parse(rawText); 
+        data = JSON.parse(data); 
       } catch(e) {
-        data = {
-          error: "伺服器未回傳 JSON (可能被 Cloudflare 阻擋)",
-          httpStatus: resp.status,
-          rawResponsePreview: rawText.substring(0, 1000)
-        };
+        // 若無法解析為 JSON，保持字串格式
       }
 
       return new Response(JSON.stringify(data), {
-        status: resp.status === 200 ? 200 : (resp.status === 403 ? 403 : 500),
+        status: resp.status,
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Content-Type': 'application/json'
         }
       });
   } catch (err) {
-      return new Response(JSON.stringify({error: "Fetch request failed: " + err.message}), { 
+      return new Response(JSON.stringify({error: err.message}), { 
         status: 500,
-        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
+        headers: { 'Access-Control-Allow-Origin': '*' }
       });
   }
 }
@@ -131,7 +128,6 @@ pre { background: rgba(0,0,0,.4); padding: 1rem; border-radius: 8px; overflow: a
 .status { padding: 1rem; border-radius: 12px; margin: 1rem 0; text-align: center; }
 .loading { animation: pulse 1.5s infinite; background: rgba(102,126,234,.3); }
 @keyframes pulse { 50% { opacity: .5; } }
-.error-msg { background: rgba(255,0,0,0.2); padding: 10px; border-radius: 8px; border: 1px solid red; margin-top: 10px;}
 </style>
 </head>
 <body>
@@ -168,6 +164,7 @@ pre { background: rgba(0,0,0,.4); padding: 1rem; border-radius: 8px; overflow: a
 let currentJobId = null;
 let pollTimer = null;
 
+// 切換 Tab
 const tabs = document.querySelectorAll('.tab');
 tabs.forEach(tab => tab.addEventListener('click', (e) => {
   tabs.forEach(t => t.classList.remove('active'));
@@ -191,6 +188,7 @@ async function generateImage() {
     if (el.value) formData.append(id, el.value);
   });
 
+  // 轉換成 JSON 顯示在請求畫面中
   const reqData = Object.fromEntries(formData.entries());
   document.getElementById('api-request').textContent = JSON.stringify(reqData, null, 2);
 
@@ -198,14 +196,7 @@ async function generateImage() {
   try {
     const resp = await fetch('/api/generate', { method: 'POST', body: formData });
     const endTime = Date.now();
-
-    const rawText = await resp.text();
-    let data;
-    try {
-        data = JSON.parse(rawText);
-    } catch(e) {
-        data = { error: "解析失敗，可能遭遇阻擋", rawResponse: rawText };
-    }
+    const data = await resp.json();
 
     statusEl.innerHTML = \`<div class="status">\${resp.status} (\${endTime - startTime}ms)</div>\`;
     document.getElementById('api-response').textContent = JSON.stringify(data, null, 2);
@@ -214,17 +205,15 @@ async function generateImage() {
       currentJobId = data.id;
       document.getElementById('job-status').innerHTML = \`任務 ID: \${currentJobId}<br>自動輪詢狀態中...\`;
       pollHistory();
-    } else if (data.error) {
-       document.getElementById('job-status').innerHTML = \`<div class="error-msg">\${data.error}<br>HTTP \${resp.status}</div>\`;
-       document.querySelector('[data-tab="response"]').click();
     } else {
-       document.getElementById('job-status').innerHTML = '未取得任務 ID。';
+       document.getElementById('job-status').innerHTML = '未取得任務 ID，請檢查 API 響應或授權狀態。';
     }
   } catch (err) {
     statusEl.innerHTML = \`<div class="status" style="background:rgba(255,0,0,0.5);">錯誤: \${err.message}</div>\`;
   } finally {
     btn.disabled = false;
     btn.textContent = '🚀 生成圖片';
+    document.querySelector('[data-tab="preview"]').click();
   }
 }
 
@@ -234,15 +223,7 @@ async function pollHistory() {
     if (!currentJobId) return;
     try {
       const resp = await fetch(\`/api/history/\${currentJobId}\`);
-      const rawText = await resp.text();
-      let hist;
-      try {
-          hist = JSON.parse(rawText);
-      } catch(e) {
-          console.error("輪詢 JSON 解析失敗", rawText);
-          return;
-      }
-
+      const hist = await resp.json();
       document.getElementById('history-data').textContent = JSON.stringify(hist, null, 2);
 
       if (hist.status === 'completed' || hist.status === 'success') {
@@ -257,7 +238,9 @@ async function pollHistory() {
         document.getElementById('job-status').innerHTML = '❌ 生成失敗。';
         clearInterval(pollTimer);
       }
-    } catch(e) {}
+    } catch(e) {
+        console.error('輪詢失敗', e);
+    }
   }, 3000);
 }
 </script>
