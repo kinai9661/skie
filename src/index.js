@@ -2,12 +2,10 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // 處理 API 請求 (Proxy & History)
     if (url.pathname.startsWith('/api/')) {
       return await handleAPI(request, url, env);
     }
 
-    // 處理根目錄請求，回傳 UI
     return new Response(getUI(), {
       headers: { 'Content-Type': 'text/html; charset=utf-8' }
     });
@@ -15,29 +13,15 @@ export default {
 };
 
 async function handleAPI(request, url, env) {
-  let token = '';
-  let guardId = '';
+  const token = env.TOKEN;
+  const guardId = env.GUARD_ID;
 
-  try {
-    const secrets = await env.API_SECRETS.get(['TOKEN', 'GUARD_ID'], { type: 'json' });
-    if (secrets) {
-      token = secrets.TOKEN;
-      guardId = secrets.GUARD_ID;
-    }
-  } catch (e) {
-    token = await env.API_SECRETS.get('TOKEN');
-    guardId = await env.API_SECRETS.get('GUARD_ID');
-  }
-
-  if (!token || !guardId) {
+  if (!token || !guardId || token === 'your-token-here') {
     return new Response(JSON.stringify({
-      error: 'KV 缺少 TOKEN 或 GUARD_ID 變數，請在 Cloudflare Dashboard 設定。'
+      error: '缺少 TOKEN 或 GUARD_ID。請在 Cloudflare Dashboard 設定環境變數。'
     }), { 
       status: 500, 
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      } 
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } 
     });
   }
 
@@ -50,6 +34,27 @@ async function handleAPI(request, url, env) {
     return new Response('無效端點', { status: 404 });
   }
 
+  // 根據你提供的真實 Request 特徵，完美還原瀏覽器的 Fetch Headers
+  const headers = new Headers();
+  headers.set('Authorization', `Bearer ${token}`);
+  headers.set('x-guard-id', guardId);
+  headers.set('Accept', 'application/json, text/plain, */*');
+  headers.set('Accept-Language', 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7');
+  headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+  headers.set('Sec-Ch-Ua', '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"');
+  headers.set('Sec-Ch-Ua-Mobile', '?0');
+  headers.set('Sec-Ch-Ua-Platform', '"Windows"');
+
+  // 關鍵設定：加入 Referrer 與對應的 Policy
+  headers.set('Origin', 'https://geminigen.ai'); 
+  headers.set('Referer', 'https://geminigen.ai/');
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+
+  // 加入其他常見的防護繞過標頭
+  headers.set('Sec-Fetch-Dest', 'empty');
+  headers.set('Sec-Fetch-Mode', 'cors');
+  headers.set('Sec-Fetch-Site', 'same-site');
+
   let bodyData = null;
   if (request.method === 'POST') {
     try {
@@ -61,10 +66,8 @@ async function handleAPI(request, url, env) {
 
   const fetchOptions = {
     method: request.method,
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'x-guard-id': guardId
-    }
+    headers: headers,
+    redirect: 'follow'
   };
 
   if (request.method === 'POST') {
@@ -73,23 +76,30 @@ async function handleAPI(request, url, env) {
 
   try {
       const resp = await fetch(targetUrl, fetchOptions);
-      let data = await resp.text();
+      const rawText = await resp.text();
+      let data;
 
       try { 
-        data = JSON.parse(data); 
-      } catch(e) {}
+        data = JSON.parse(rawText); 
+      } catch(e) {
+        data = {
+          error: "伺服器未回傳 JSON (可能被 Cloudflare 阻擋)",
+          httpStatus: resp.status,
+          rawResponsePreview: rawText.substring(0, 1000)
+        };
+      }
 
-      return new Response(typeof data === 'string' ? data : JSON.stringify(data), {
-        status: resp.status,
+      return new Response(JSON.stringify(data), {
+        status: resp.status === 200 ? 200 : (resp.status === 403 ? 403 : 500),
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Content-Type': 'application/json'
         }
       });
   } catch (err) {
-      return new Response(JSON.stringify({error: err.message}), { 
+      return new Response(JSON.stringify({error: "Fetch request failed: " + err.message}), { 
         status: 500,
-        headers: { 'Access-Control-Allow-Origin': '*' }
+        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }
       });
   }
 }
@@ -121,6 +131,7 @@ pre { background: rgba(0,0,0,.4); padding: 1rem; border-radius: 8px; overflow: a
 .status { padding: 1rem; border-radius: 12px; margin: 1rem 0; text-align: center; }
 .loading { animation: pulse 1.5s infinite; background: rgba(102,126,234,.3); }
 @keyframes pulse { 50% { opacity: .5; } }
+.error-msg { background: rgba(255,0,0,0.2); padding: 10px; border-radius: 8px; border: 1px solid red; margin-top: 10px;}
 </style>
 </head>
 <body>
@@ -187,7 +198,14 @@ async function generateImage() {
   try {
     const resp = await fetch('/api/generate', { method: 'POST', body: formData });
     const endTime = Date.now();
-    const data = await resp.json();
+
+    const rawText = await resp.text();
+    let data;
+    try {
+        data = JSON.parse(rawText);
+    } catch(e) {
+        data = { error: "解析失敗，可能遭遇阻擋", rawResponse: rawText };
+    }
 
     statusEl.innerHTML = \`<div class="status">\${resp.status} (\${endTime - startTime}ms)</div>\`;
     document.getElementById('api-response').textContent = JSON.stringify(data, null, 2);
@@ -196,15 +214,17 @@ async function generateImage() {
       currentJobId = data.id;
       document.getElementById('job-status').innerHTML = \`任務 ID: \${currentJobId}<br>自動輪詢狀態中...\`;
       pollHistory();
+    } else if (data.error) {
+       document.getElementById('job-status').innerHTML = \`<div class="error-msg">\${data.error}<br>HTTP \${resp.status}</div>\`;
+       document.querySelector('[data-tab="response"]').click();
     } else {
-       document.getElementById('job-status').innerHTML = '未取得任務 ID，請檢查 API 響應或授權狀態。';
+       document.getElementById('job-status').innerHTML = '未取得任務 ID。';
     }
   } catch (err) {
     statusEl.innerHTML = \`<div class="status" style="background:rgba(255,0,0,0.5);">錯誤: \${err.message}</div>\`;
   } finally {
     btn.disabled = false;
     btn.textContent = '🚀 生成圖片';
-    document.querySelector('[data-tab="preview"]').click();
   }
 }
 
@@ -214,7 +234,15 @@ async function pollHistory() {
     if (!currentJobId) return;
     try {
       const resp = await fetch(\`/api/history/\${currentJobId}\`);
-      const hist = await resp.json();
+      const rawText = await resp.text();
+      let hist;
+      try {
+          hist = JSON.parse(rawText);
+      } catch(e) {
+          console.error("輪詢 JSON 解析失敗", rawText);
+          return;
+      }
+
       document.getElementById('history-data').textContent = JSON.stringify(hist, null, 2);
 
       if (hist.status === 'completed' || hist.status === 'success') {
@@ -229,9 +257,7 @@ async function pollHistory() {
         document.getElementById('job-status').innerHTML = '❌ 生成失敗。';
         clearInterval(pollTimer);
       }
-    } catch(e) {
-        console.error('輪詢失敗', e);
-    }
+    } catch(e) {}
   }, 3000);
 }
 </script>
