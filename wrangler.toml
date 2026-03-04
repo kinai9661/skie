@@ -3,5 +3,5 @@ main = "src/index.js"
 compatibility_date = "2024-03-20"
 
 [vars]
-TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzI2NDQ0NzgsInN1YiI6IjIwNjZkNjdhLWYzYzQtMTFmMC1iN2Q3LWYyZjFmZTg1NzFhYyJ9.bnhuC9O5PDUJ_pLzL9S1S8CC4upMS9YCraQWAa655oE"
-GUARD_ID = "AcMg5pPJIdeJVZtdzGnBBXABws6IsFj16EOw88EbKo73a5sIupPJsmRvqo-pQcerdRtRzrssC5dfZYa6MCwLl19lhrowK_34HWWGuhFWZoIhVmaCIQ"
+TOKEN = "your-token-here"
+GUARD_ID = "your-guard-id-here"

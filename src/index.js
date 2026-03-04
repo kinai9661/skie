@@ -27,8 +27,10 @@ async function handleAPI(request, url, env) {
 
   let targetUrl;
 
+  // 關鍵修復：你提供的真實生成路徑是 /api/generate_image，而不是 /api/generate
+  // 但我們為了讓前端不需改動太多，依舊讓前端打 /api/generate，Worker 負責轉發到正確的 /api/generate_image
   if (url.pathname === '/api/generate') {
-    targetUrl = 'https://api.geminigen.ai/uapi/v1/generate_image';
+    targetUrl = 'https://api.geminigen.ai/api/generate_image';
   } else if (url.pathname.startsWith('/api/history/')) {
     const pathAndSearch = url.pathname + url.search;
     targetUrl = `https://api.geminigen.ai${pathAndSearch}`;
@@ -37,20 +39,8 @@ async function handleAPI(request, url, env) {
   }
 
   const headers = new Headers();
-
-  // ==========================================
-  // 【核心修復】雙重 Auth Headers 策略
-  // 不同的 GeminiGen 子路由要求的 API Key 格式不同。
-  // ==========================================
-  // 1. History 端點需要 Bearer
   headers.set('Authorization', `Bearer ${token}`);
-  // 2. 生成端點 (uapi) 可能需要 x-goog-api-key 或 x-api-key 或 x-gemini-apikey
-  headers.set('x-goog-api-key', token);
-  headers.set('x-api-key', token);
-  // 保留原有的反爬蟲 GUARD ID
   headers.set('x-guard-id', guardId);
-
-  // 瀏覽器防護偽裝
   headers.set('Accept', 'application/json, text/plain, */*');
   headers.set('Accept-Language', 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7');
   headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
