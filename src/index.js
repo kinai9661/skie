@@ -16,8 +16,8 @@ async function handleAPI(request, url) {
   // ==========================================
   // 🔑 請在這裡填寫你固定的 TOKEN 與 GUARD_ID
   // ==========================================
-  const token = "請將你的Bearer Token寫在這裡";
-  const guardId = "請將你的x-guard-id寫在這裡";
+  const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzI2NTMwMjIsInN1YiI6IjIwNjZkNjdhLWYzYzQtMTFmMC1iN2Q3LWYyZjFmZTg1NzFhYyJ9.VRNF4KJr-dQu9JZuBAjD0LLeJzq5kW0n2uV_u8cZRC8";
+  const guardId = "AcMg5pPJIdeJVZtdzGnBBXABws8Y7IKfvuZzZAUsWD2X_TyizRUyo3Hy8u4qU0MZTj_IhjgsC5dfZYa6MCwLl19lhrowK_34HWWGuhFWZoIhVmaCIQ";
 
   if (token.includes("請將你的Bearer")) {
     return new Response(JSON.stringify({
