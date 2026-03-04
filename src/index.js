@@ -14,10 +14,10 @@ export default {
 
 async function handleAPI(request, url) {
   // ==========================================
-  // 🔑 這些是由 Python 腳本模擬產生的隨機 Token
+  // 🔑 請在這裡填寫你固定的 TOKEN 與 GUARD_ID
   // ==========================================
-  const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.v7Gd8htyHDDqd3Z7TEJMpJ3JUlToHXyUQtTY1GPY.iOkFbpiMEQdhUYOuwXnIDiqulZjAzTo9R_tWY8sE15d";
-  const guardId = "OByaME3rFi7vV3pmHqiZJQZrid6Oz1tp";
+  const token = "請將你的Bearer Token寫在這裡";
+  const guardId = "請將你的x-guard-id寫在這裡";
 
   let targetUrl;
   if (url.pathname === '/api/generate') {
@@ -65,7 +65,6 @@ async function handleAPI(request, url) {
 
       if (typeof data === 'object' && !data.id && !data.task_id && !data.uuid) {
          data._debug_keys = Object.keys(data);
-         data._debug_fake_auth = "注意：你目前使用的是隨機生成的假 Token，目標伺服器可能會回傳權限錯誤 (401/403) 或擋掉請求。";
       }
 
       return new Response(JSON.stringify(data), {
@@ -85,7 +84,7 @@ function getUI() {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>geminigen.ai 逆向 UI (模擬測試版)</title>
+<title>geminigen.ai 逆向 UI</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: system-ui, -apple-system, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: #fff; }
@@ -106,23 +105,17 @@ pre { background: rgba(0,0,0,.4); padding: 1rem; border-radius: 8px; overflow: a
 .loading { animation: pulse 1.5s infinite; background: rgba(102,126,234,.3); }
 @keyframes pulse { 50% { opacity: .5; } }
 .error-msg { background: rgba(255,0,0,0.2); padding: 10px; border-radius: 8px; border: 1px solid red; margin-top: 10px;}
-.warning-box { background: rgba(255,165,0,0.2); padding: 10px; border-radius: 8px; border: 1px solid orange; margin-bottom: 1rem;}
 </style>
 </head>
 <body>
 <div class="container">
   <div class="left">
     <h1>🖼️ geminigen.ai 生成器</h1>
-    <div class="warning-box">
-      <strong>⚠️ 測試模式開啟</strong><br>
-      目前使用的是系統隨機生成的虛擬 Token。<br>
-      預期後端會回傳 401 Unauthorized。
-    </div>
     <textarea id="prompt" rows="3">A beautiful sunset over mountains</textarea>
     <select id="model"><option value="nano-banana-pro">Nano Banana Pro</option><option value="imagen-4-ultra">Imagen 4 Ultra</option></select>
     <input id="aspect_ratio" value="16:9">
     <input id="style" value="Photorealistic">
-    <button onclick="generateImage()">🚀 發送測試請求</button>
+    <button onclick="generateImage()">🚀 生成圖片</button>
     <div id="status"></div>
   </div>
   <div class="right">
@@ -195,19 +188,75 @@ async function generateImage() {
       document.getElementById('job-status').innerHTML = \`任務 ID: \${currentJobId}<br>自動輪詢狀態中...\`;
       pollHistory();
     } else {
-       document.getElementById('job-status').innerHTML = '<div class="error-msg">未取得任務 ID。<br>（因為使用的是隨機假 Token，這是正常現象，請查看 API 響應了解伺服器阻擋的原因）</div>';
+       document.getElementById('job-status').innerHTML = '<div class="error-msg">未取得任務 ID，請查看 API 響應。</div>';
        document.querySelector('[data-tab="response"]').click();
     }
-    statusEl.innerHTML = \`<div class="status">\${resp.status} (假 Token 測試)</div>\`;
+    statusEl.innerHTML = \`<div class="status">\${resp.status} OK</div>\`;
   } catch (err) {
     statusEl.innerHTML = \`<div class="status" style="background:red;">錯誤: \${err.message}</div>\`;
   } finally {
     btn.disabled = false;
-    btn.textContent = '🚀 發送測試請求';
+    btn.textContent = '🚀 生成圖片';
   }
 }
 
-// 輪詢邏輯保持不變
-async function pollHistory() { /* ... */ }
+async function pollHistory() {
+  if (pollTimer) clearInterval(pollTimer);
+
+  pollTimer = setInterval(async () => {
+    if (!currentJobId) return;
+    pollCount++;
+
+    try {
+      const resp = await fetch(\`/api/history/\${currentJobId}\`);
+
+      if (resp.status === 404) {
+          if (pollCount > 15) {
+             document.getElementById('job-status').innerHTML = '<div class="error-msg">歷史任務 404 找不到。</div>';
+             clearInterval(pollTimer);
+          }
+          return;
+      }
+
+      const hist = await resp.json();
+      document.getElementById('history-data').textContent = JSON.stringify(hist, null, 2);
+
+      let outUrl = hist.output_url || hist.url || hist.image_url || 
+                   (hist.data && (hist.data.url || hist.data.image_url));
+
+      if (!outUrl) {
+          if (hist.images && hist.images.length > 0) outUrl = hist.images[0].url || hist.images[0];
+          if (hist.outputs && hist.outputs.length > 0) outUrl = hist.outputs[0].url || hist.outputs[0];
+          if (hist.data && hist.data.images && hist.data.images.length > 0) outUrl = hist.data.images[0];
+      }
+
+      const isCompleted = hist.status === 'completed' || hist.status === 'success' || hist.status === 'finished' || hist.status === 200 || hist.status === 1 || outUrl;
+      const isFailed = hist.status === 'failed' || hist.status === 'error' || hist.status === -1;
+
+      if (outUrl) {
+         document.getElementById('image-preview').src = typeof outUrl === 'string' ? outUrl : outUrl.url;
+         document.getElementById('image-preview').style.display = 'block';
+         document.getElementById('job-status').innerHTML = '🎉 生成成功！';
+         clearInterval(pollTimer);
+      } else if (isFailed) {
+         document.getElementById('job-status').innerHTML = \`<div class="error-msg">❌ 生成失敗：\${hist.error || hist.message || '未知錯誤'}</div>\`;
+         clearInterval(pollTimer);
+      } else if (isCompleted && !outUrl) {
+         document.getElementById('job-status').innerHTML = '⚠️ 狀態顯示完成，但找不到圖片 URL，請檢查歷史 JSON。';
+         clearInterval(pollTimer);
+      } else {
+         document.getElementById('job-status').innerHTML = \`任務 ID: \${currentJobId}<br>生成中... 請稍候 (\${pollCount * 4}秒) <br>當前狀態: \${hist.status || hist.state || '處理中'}\`;
+      }
+      errorCount = 0;
+    } catch(e) {
+      errorCount++;
+      if(errorCount > 5) {
+          document.getElementById('job-status').innerHTML = '<div class="error-msg">⚠️ 連續輪詢失敗，停止。請檢查 API。</div>';
+          clearInterval(pollTimer);
+      }
+    }
+  }, 4000); 
+}
 </script>
-</body></html>
+</body></html>`;
+}
