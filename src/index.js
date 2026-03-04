@@ -15,7 +15,6 @@ export default {
 };
 
 async function handleAPI(request, url, env) {
-  // 從 Cloudflare KV 中取得授權資訊
   let token = '';
   let guardId = '';
 
@@ -26,12 +25,10 @@ async function handleAPI(request, url, env) {
       guardId = secrets.GUARD_ID;
     }
   } catch (e) {
-    // 降級處理：如果 json 解析失敗，嘗試直接讀取字串
     token = await env.API_SECRETS.get('TOKEN');
     guardId = await env.API_SECRETS.get('GUARD_ID');
   }
 
-  // 若缺乏憑證則阻擋請求
   if (!token || !guardId) {
     return new Response(JSON.stringify({
       error: 'KV 缺少 TOKEN 或 GUARD_ID 變數，請在 Cloudflare Dashboard 設定。'
@@ -44,7 +41,6 @@ async function handleAPI(request, url, env) {
     });
   }
 
-  // 判斷目標 URL
   let targetUrl;
   if (url.pathname === '/api/generate') {
     targetUrl = 'https://api.geminigen.ai/api/generate';
@@ -54,39 +50,36 @@ async function handleAPI(request, url, env) {
     return new Response('無效端點', { status: 404 });
   }
 
-  // 接收前端上傳的 FormData 並重建
-  let bodyData;
+  let bodyData = null;
   if (request.method === 'POST') {
     try {
       bodyData = await request.formData();
     } catch(e) {
-      // 處理非 FormData 請求
       return new Response(JSON.stringify({error: 'Invalid FormData'}), {status: 400});
     }
   }
 
-  // 發送請求至真正的 GeminiGen API
-  const backendReq = new Request(targetUrl, {
+  const fetchOptions = {
     method: request.method,
     headers: {
       'Authorization': `Bearer ${token}`,
       'x-guard-id': guardId
-    },
-    body: request.method === 'POST' ? bodyData : null,
-    duplex: request.method === 'POST' ? 'half' : undefined
-  });
+    }
+  };
+
+  if (request.method === 'POST') {
+      fetchOptions.body = bodyData;
+  }
 
   try {
-      const resp = await fetch(backendReq);
+      const resp = await fetch(targetUrl, fetchOptions);
       let data = await resp.text();
 
       try { 
         data = JSON.parse(data); 
-      } catch(e) {
-        // 若無法解析為 JSON，保持字串格式
-      }
+      } catch(e) {}
 
-      return new Response(JSON.stringify(data), {
+      return new Response(typeof data === 'string' ? data : JSON.stringify(data), {
         status: resp.status,
         headers: {
           'Access-Control-Allow-Origin': '*',
@@ -164,7 +157,6 @@ pre { background: rgba(0,0,0,.4); padding: 1rem; border-radius: 8px; overflow: a
 let currentJobId = null;
 let pollTimer = null;
 
-// 切換 Tab
 const tabs = document.querySelectorAll('.tab');
 tabs.forEach(tab => tab.addEventListener('click', (e) => {
   tabs.forEach(t => t.classList.remove('active'));
@@ -188,7 +180,6 @@ async function generateImage() {
     if (el.value) formData.append(id, el.value);
   });
 
-  // 轉換成 JSON 顯示在請求畫面中
   const reqData = Object.fromEntries(formData.entries());
   document.getElementById('api-request').textContent = JSON.stringify(reqData, null, 2);
 

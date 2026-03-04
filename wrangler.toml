@@ -1,8 +1,8 @@
 name = "geminigen-proxy-ui"
 main = "src/index.js"
-compatibility_date = "2026-03-05"
-compatibility_flags = ["nodejs_compat"]
+compatibility_date = "2024-03-20"
 
 [[kv_namespaces]]
 binding = "API_SECRETS"
-id = "87de20257f2e4cbf8e9dde2b8d3337c9"
+id = "your-kv-id-here"
+preview_id = "your-preview-kv-id-here"
