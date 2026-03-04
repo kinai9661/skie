@@ -1,31 +1,50 @@
-// geminigen.ai 逆向工程 UI Proxy Worker
-// 支援 nano-banana-pro 等模型，單頁 UI，自動輪詢歷史
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
 
-addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request));
-});
+    // 處理 API 請求 (Proxy & History)
+    if (url.pathname.startsWith('/api/')) {
+      return await handleAPI(request, url, env);
+    }
 
-async function handleRequest(request) {
-  const url = new URL(request.url);
+    // 處理根目錄請求，回傳 UI
+    return new Response(getUI(), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    });
+  }
+};
 
-  if (url.pathname.startsWith('/api/')) {
-    return await handleAPI(request, url);
+async function handleAPI(request, url, env) {
+  // 從 Cloudflare KV 中取得授權資訊
+  let token = '';
+  let guardId = '';
+
+  try {
+    const secrets = await env.API_SECRETS.get(['TOKEN', 'GUARD_ID'], { type: 'json' });
+    if (secrets) {
+      token = secrets.TOKEN;
+      guardId = secrets.GUARD_ID;
+    }
+  } catch (e) {
+    // 降級處理：如果 json 解析失敗，嘗試直接讀取字串
+    token = await env.API_SECRETS.get('TOKEN');
+    guardId = await env.API_SECRETS.get('GUARD_ID');
   }
 
-  return new Response(getUI(), {
-    headers: { 'Content-Type': 'text/html; charset=utf-8' }
-  });
-}
-
-async function handleAPI(request, url) {
-  const secrets = await API_SECRETS.get(['TOKEN', 'GUARD_ID'], { type: 'json' });
-  const token = secrets ? secrets.TOKEN : '';
-  const guardId = secrets ? secrets.GUARD_ID : '';
-
+  // 若缺乏憑證則阻擋請求
   if (!token || !guardId) {
-    return new Response(JSON.stringify({error: 'KV 缺少 TOKEN 或 GUARD_ID'}), { status: 500, headers: {'Content-Type': 'application/json'} });
+    return new Response(JSON.stringify({
+      error: 'KV 缺少 TOKEN 或 GUARD_ID 變數，請在 Cloudflare Dashboard 設定。'
+    }), { 
+      status: 500, 
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      } 
+    });
   }
 
+  // 判斷目標 URL
   let targetUrl;
   if (url.pathname === '/api/generate') {
     targetUrl = 'https://api.geminigen.ai/api/generate';
@@ -35,21 +54,38 @@ async function handleAPI(request, url) {
     return new Response('無效端點', { status: 404 });
   }
 
-  const formData = await request.formData();
+  // 接收前端上傳的 FormData 並重建
+  let bodyData;
+  if (request.method === 'POST') {
+    try {
+      bodyData = await request.formData();
+    } catch(e) {
+      // 處理非 FormData 請求
+      return new Response(JSON.stringify({error: 'Invalid FormData'}), {status: 400});
+    }
+  }
+
+  // 發送請求至真正的 GeminiGen API
   const backendReq = new Request(targetUrl, {
-    method: 'POST',
+    method: request.method,
     headers: {
       'Authorization': `Bearer ${token}`,
       'x-guard-id': guardId
     },
-    body: formData,
-    duplex: 'half'
+    body: request.method === 'POST' ? bodyData : null,
+    duplex: request.method === 'POST' ? 'half' : undefined
   });
 
   try {
       const resp = await fetch(backendReq);
       let data = await resp.text();
-      try { data = JSON.parse(data); } catch(e) {}
+
+      try { 
+        data = JSON.parse(data); 
+      } catch(e) {
+        // 若無法解析為 JSON，保持字串格式
+      }
+
       return new Response(JSON.stringify(data), {
         status: resp.status,
         headers: {
@@ -58,7 +94,10 @@ async function handleAPI(request, url) {
         }
       });
   } catch (err) {
-      return new Response(JSON.stringify({error: err.message}), { status: 500 });
+      return new Response(JSON.stringify({error: err.message}), { 
+        status: 500,
+        headers: { 'Access-Control-Allow-Origin': '*' }
+      });
   }
 }
 
@@ -124,6 +163,8 @@ pre { background: rgba(0,0,0,.4); padding: 1rem; border-radius: 8px; overflow: a
 <script>
 let currentJobId = null;
 let pollTimer = null;
+
+// 切換 Tab
 const tabs = document.querySelectorAll('.tab');
 tabs.forEach(tab => tab.addEventListener('click', (e) => {
   tabs.forEach(t => t.classList.remove('active'));
@@ -147,16 +188,17 @@ async function generateImage() {
     if (el.value) formData.append(id, el.value);
   });
 
+  // 轉換成 JSON 顯示在請求畫面中
   const reqData = Object.fromEntries(formData.entries());
   document.getElementById('api-request').textContent = JSON.stringify(reqData, null, 2);
 
-  const startTime = performance.now();
+  const startTime = Date.now();
   try {
     const resp = await fetch('/api/generate', { method: 'POST', body: formData });
-    const endTime = performance.now();
+    const endTime = Date.now();
     const data = await resp.json();
 
-    statusEl.innerHTML = \`<div class="status">\${resp.status} (\${Math.round(endTime - startTime)}ms)</div>\`;
+    statusEl.innerHTML = \`<div class="status">\${resp.status} (\${endTime - startTime}ms)</div>\`;
     document.getElementById('api-response').textContent = JSON.stringify(data, null, 2);
 
     if (data.id) {
@@ -164,7 +206,7 @@ async function generateImage() {
       document.getElementById('job-status').innerHTML = \`任務 ID: \${currentJobId}<br>自動輪詢狀態中...\`;
       pollHistory();
     } else {
-       document.getElementById('job-status').innerHTML = '未取得任務 ID，請檢查 API 響應';
+       document.getElementById('job-status').innerHTML = '未取得任務 ID，請檢查 API 響應或授權狀態。';
     }
   } catch (err) {
     statusEl.innerHTML = \`<div class="status" style="background:rgba(255,0,0,0.5);">錯誤: \${err.message}</div>\`;
@@ -189,15 +231,15 @@ async function pollHistory() {
         if(outUrl) {
             document.getElementById('image-preview').src = outUrl;
             document.getElementById('image-preview').style.display = 'block';
-            document.getElementById('job-status').innerHTML = '生成成功！';
+            document.getElementById('job-status').innerHTML = '🎉 生成成功！';
         }
         clearInterval(pollTimer);
       } else if (hist.status === 'failed' || hist.status === 'error') {
-        document.getElementById('job-status').innerHTML = '生成失敗。';
+        document.getElementById('job-status').innerHTML = '❌ 生成失敗。';
         clearInterval(pollTimer);
       }
     } catch(e) {
-        console.error(e);
+        console.error('輪詢失敗', e);
     }
   }, 3000);
 }
